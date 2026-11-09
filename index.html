@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Tablero Morales Salcedo</title>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #050b14;
+      color: #00f0ff;
+      font-family: -apple-system, Helvetica, Arial, sans-serif;
+      padding: 20px;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #00f0ff;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+    .title { font-size: 24px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
+    .clock { font-size: 40px; font-weight: 300; color: #ffffff; }
+    
+    .grid {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+    }
+    .col {
+      display: table-cell;
+      vertical-align: top;
+      padding: 10px;
+      width: 50%;
+    }
+
+    .card {
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid #00f0ff;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+    .card-title {
+      font-size: 16px;
+      color: #ffffff;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .btn-sync {
+      background: #00f0ff;
+      color: #000000;
+      border: none;
+      padding: 12px 20px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 5px;
+      cursor: pointer;
+      width: 100%;
+    }
+    
+    #photo-frame {
+      width: 100%;
+      height: 250px;
+      background-color: #000;
+      border: 1px solid #00f0ff;
+      background-size: cover;
+      background-position: center;
+    }
+  </style>
+
+  <!-- Google API Client Library para iOS 9 Compatibility -->
+  <script src="https://apis.google.com/js/api.js"></script>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title">J.A.R.V.I.S. // Morales Salcedo</div>
+    <div class="clock" id="time-display">00:00</div>
+  </div>
+
+  <div class="grid">
+    <!-- Columna Izquierda: Calendario y Control -->
+    <div class="col">
+      <div class="card">
+        <div class="card-title">Sincronización de Cuenta</div>
+        <button class="btn-sync" onclick="handleAuthClick()">CONECTAR GOOGLE</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Agenda Familiar (Calendar)</div>
+        <ul id="events-list" style="list-style: none; color: #fff; font-size: 14px;">
+          <li>Presiona "Conectar Google" para cargar eventos...</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Columna Derecha: Marco de Fotos -->
+    <div class="col">
+      <div class="card">
+        <div class="card-title">Google Fotos</div>
+        <div id="photo-frame"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- SUS CREDENCIALES CONFIGURADAS ---
+    var CLIENT_ID = '969068172702-q4gu770127dbn4dpnlfjetuv772tpl5o.apps.googleusercontent.com';
+    var API_KEY = 'AIzaSyClw4utQsiupdaCoVfZkF1MpkHqPFwHtAE'; 
+    var DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
+    var SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+
+    // Reloj sencillo para Safari iOS 9
+    function updateClock() {
+      var now = new Date();
+      var h = String(now.getHours()).padStart ? String(now.getHours()).padStart(2, '0') : (now.getHours() < 10 ? '0' : '') + now.getHours();
+      var m = String(now.getMinutes()).padStart ? String(now.getMinutes()).padStart(2, '0') : (now.getMinutes() < 10 ? '0' : '') + now.getMinutes();
+      document.getElementById('time-display').innerText = h + ":" + m;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Inicializar Google Client API
+    function handleClientLoad() {
+      gapi.load('client:auth2', initClient);
+    }
+
+    function initClient() {
+      gapi.client.init({
+        apiKey: API_KEY,
+        clientId: CLIENT_ID,
+        discoveryDocs: DISCOVERY_DOCS,
+        scope: SCOPES
+      }).then(function () {
+        console.log("Google API lista");
+      }, function(error) {
+        console.log("Error inicializando Google API: " + JSON.stringify(error));
+      });
+    }
+
+    function handleAuthClick() {
+      gapi.auth2.getAuthInstance().signIn().then(function() {
+        listUpcomingEvents();
+      });
+    }
+
+    function listUpcomingEvents() {
+      gapi.client.calendar.events.list({
+        'calendarId': 'primary',
+        'timeMin': (new Date()).toISOString(),
+        'showDeleted': false,
+        'singleEvents': true,
+        'maxResults': 5,
+        'orderBy': 'startTime'
+      }).then(function(response) {
+        var events = response.result.items;
+        var list = document.getElementById('events-list');
+        list.innerHTML = '';
+
+        if (events.length > 0) {
+          for (var i = 0; i < events.length; i++) {
+            var event = events[i];
+            var when = event.start.dateTime || event.start.date;
+            var item = document.createElement('li');
+            item.style.marginBottom = "8px";
+            item.innerText = "• " + event.summary + " (" + when.substring(0, 10) + ")";
+            list.appendChild(item);
+          }
+        } else {
+          list.innerHTML = '<li>No hay eventos próximos.</li>';
+        }
+      });
+    }
+
+    // Cargar la librería al iniciar
+    handleClientLoad();
+  </script>
+
+</body>
+</html>
