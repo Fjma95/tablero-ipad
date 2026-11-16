@@ -25,7 +25,6 @@
       position: relative;
     }
 
-    /* Capa de video de fondo compatible con iOS 9 */
     #bg-video {
       position: fixed;
       top: 50%;
@@ -38,7 +37,6 @@
       transform: translate(-50%, -50%);
       z-index: 0;
       display: none;
-      object-fit: cover;
     }
 
     .overlay {
@@ -154,8 +152,8 @@
       bottom: 14px;
       right: 24px;
       font-size: 11px;
-      color: rgba(255, 255, 255, 0.55);
-      background: rgba(0, 0, 0, 0.4);
+      color: rgba(255, 255, 255, 0.65);
+      background: rgba(0, 0, 0, 0.5);
       padding: 4px 10px;
       border-radius: 12px;
       z-index: 2;
@@ -176,8 +174,7 @@
 </head>
 <body>
 
-  <!-- Reproductor de video de fondo (silenciado para permitir autoplay en iOS 9) -->
-  <video id="bg-video" muted playsinline webkit-playsinline></video>
+  <video id="bg-video" muted playsinline webkit-playsinline preload="auto"></video>
 
   <div class="overlay">
     <div class="main-row">
@@ -214,18 +211,18 @@
     var CLIENT_ID = '723569260705-9f2tiggc2gthf5dgf49q9e9ohqbkj0ng.apps.googleusercontent.com';
     var API_KEY = 'AIzaSyDO0GhTJKd6YvVosrfOWfWNV70OKmZOUqQ';
     var DRIVE_FOLDER_ID = '1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq';
-    
     var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly';
 
-    // --- 2. CARRUSEL MIXTO (FOTOS + VIDEOS MP4 DESDE DRIVE) ---
+    // --- 2. CARRUSEL MIXTO (FOTOS + VIDEOS MP4) ---
     var mediaDrive = [];
     var mediaIndex = 0;
     var carruselIniciado = false;
     var slideTimer = null;
+    var enTransicion = false;
 
     function cargarMultimediaDrive() {
       var badge = document.getElementById('drive-status');
-      badge.innerText = 'Drive: buscando fotos y videos...';
+      badge.innerText = 'Drive: buscando archivos...';
 
       gapi.client.drive.files.list({
         q: "'" + DRIVE_FOLDER_ID + "' in parents and (mimeType contains 'image/' or mimeType = 'video/mp4') and trashed = false",
@@ -241,14 +238,17 @@
           for (var i = 0; i < files.length; i++) {
             var f = files[i];
             if (f.mimeType === 'video/mp4') {
+              // Endpoint directo de API con soporte Byte-Range para QuickTime iOS 9
               nuevosItems.push({
                 tipo: 'video',
-                url: 'https://drive.google.com/uc?export=download&id=' + f.id
+                nombre: f.name,
+                url: 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media&key=' + API_KEY
               });
               contVideos++;
             } else if (f.mimeType !== 'image/heic' && f.mimeType !== 'image/heif') {
               nuevosItems.push({
                 tipo: 'foto',
+                nombre: f.name,
                 url: 'https://drive.google.com/thumbnail?id=' + f.id + '&sz=w1024'
               });
               contFotos++;
@@ -274,42 +274,74 @@
       });
     }
 
-    function mostrarSiguienteMedia() {
+    function programarSiguiente(ms) {
       if (slideTimer) {
         clearTimeout(slideTimer);
         slideTimer = null;
       }
-      if (mediaDrive.length === 0) return;
+      slideTimer = setTimeout(function() {
+        enTransicion = false;
+        mostrarSiguienteMedia();
+      }, ms);
+    }
+
+    function mostrarSiguienteMedia() {
+      if (enTransicion || mediaDrive.length === 0) return;
+      enTransicion = true;
+
+      if (slideTimer) {
+        clearTimeout(slideTimer);
+        slideTimer = null;
+      }
 
       var item = mediaDrive[mediaIndex];
       mediaIndex = (mediaIndex + 1) % mediaDrive.length;
       var videoEl = document.getElementById('bg-video');
+      var badge = document.getElementById('drive-status');
 
       if (item.tipo === 'video') {
+        badge.innerText = 'Cargando video: ' + item.nombre;
+        videoEl.onended = null;
+        videoEl.onerror = null;
+        videoEl.oncanplay = null;
+
         videoEl.src = item.url;
         videoEl.style.display = 'block';
         videoEl.load();
 
-        videoEl.onended = function() {
+        // Tiempo máximo de espera si el video no es compatible con chip A5 (iPad 2)
+        var fallbackVideo = setTimeout(function() {
+          badge.innerText = 'Video no compatible en iPad 2 (usa H.264 720p)';
+          videoEl.pause();
           videoEl.style.display = 'none';
           videoEl.src = '';
-          mostrarSiguienteMedia();
+          enTransicion = false;
+          programarSiguiente(2000);
+        }, 12000);
+
+        videoEl.oncanplay = function() {
+          clearTimeout(fallbackVideo);
+          badge.innerText = 'Reproduciendo: ' + item.nombre;
+          videoEl.play();
+        };
+
+        videoEl.onended = function() {
+          clearTimeout(fallbackVideo);
+          videoEl.style.display = 'none';
+          videoEl.src = '';
+          enTransicion = false;
+          programarSiguiente(500);
         };
 
         videoEl.onerror = function() {
+          clearTimeout(fallbackVideo);
+          badge.innerText = 'Error formato video: ' + item.nombre;
           videoEl.style.display = 'none';
           videoEl.src = '';
-          mostrarSiguienteMedia();
+          enTransicion = false;
+          programarSiguiente(3000);
         };
 
-        var playPromise = videoEl.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(function() {
-            // Si iOS 9 bloquea el autoplay, salta al siguiente elemento
-            videoEl.style.display = 'none';
-            mostrarSiguienteMedia();
-          });
-        }
       } else {
         videoEl.pause();
         videoEl.style.display = 'none';
@@ -318,10 +350,13 @@
         var img = new Image();
         img.onload = function() {
           document.body.style.backgroundImage = "url('" + item.url + "')";
-          slideTimer = setTimeout(mostrarSiguienteMedia, 20000); // 20 segundos por foto
+          badge.innerText = 'Mostrando foto (' + mediaIndex + '/' + mediaDrive.length + ')';
+          enTransicion = false;
+          programarSiguiente(20000); // 20 segundos fijos por foto
         };
         img.onerror = function() {
-          mostrarSiguienteMedia();
+          enTransicion = false;
+          programarSiguiente(2000);
         };
         img.src = item.url;
       }
