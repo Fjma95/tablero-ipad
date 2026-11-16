@@ -11,8 +11,13 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
     body {
-      background: #0d1117 url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1024&q=80') no-repeat center center fixed;
+      background-color: #0d1117;
+      background-image: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1024&q=80');
+      background-position: center center;
+      background-repeat: no-repeat;
       background-size: cover;
+      -webkit-transition: background-image 1.5s ease-in-out;
+      transition: background-image 1.5s ease-in-out;
       color: #ffffff;
       font-family: -apple-system, Helvetica Neue, Arial, sans-serif;
       height: 100vh;
@@ -23,7 +28,7 @@
     .overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.65) 100%);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.70) 100%);
       padding: 24px;
       display: table;
       width: 100%;
@@ -48,12 +53,13 @@
 
     .weather-badge {
       display: inline-block;
-      background: rgba(255, 255, 255, 0.15);
-      padding: 8px 16px;
-      border-radius: 20px;
+      background: rgba(18, 24, 34, 0.72);
+      padding: 8px 18px;
+      border-radius: 22px;
       font-size: 18px;
       margin-bottom: 12px;
-      border: 1px solid rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
 
     .clock-big {
@@ -61,7 +67,7 @@
       font-weight: 200;
       line-height: 1;
       letter-spacing: -2px;
-      text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.65);
     }
 
     .date-sub {
@@ -70,6 +76,7 @@
       color: #e0e6ed;
       margin-top: 6px;
       text-transform: capitalize;
+      text-shadow: 0 1px 6px rgba(0,0,0,0.65);
     }
 
     .widget-card {
@@ -78,7 +85,7 @@
       border-radius: 16px;
       padding: 18px;
       margin-bottom: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
     }
 
     .widget-header {
@@ -143,7 +150,7 @@
     <div class="main-row">
       
       <div class="col-left">
-        <div class="weather-badge" id="weather-box">☀️ Hermosillo • 29°C Despejado</div>
+        <div class="weather-badge" id="weather-box">⏳ Cargando clima de Hermosillo...</div>
         <div class="clock-big" id="time-display">07:23</div>
         <div class="date-sub" id="date-display">Lunes, 16 de Noviembre</div>
       </div>
@@ -151,7 +158,7 @@
       <div class="col-right">
         <div class="widget-card" id="auth-card">
           <div class="widget-header">Cuenta Familiar</div>
-          <button class="btn-alexa" id="auth-btn" onclick="handleAuthClick()">Sincronizar Google Calendar</button>
+          <button class="btn-alexa" id="auth-btn" onclick="handleAuthClick()">Sincronizar Google</button>
           <div class="status-msg" id="status-text">Cargando servicios de Google...</div>
         </div>
 
@@ -169,16 +176,96 @@
   <div class="alexa-bar"></div>
 
   <script>
-    // --- CREDENCIALES INTEGRALES ---
+    // --- 1. CONFIGURACIÓN Y CREDENCIALES ---
     var CLIENT_ID = '723569260705-9f2tiggc2gthf5dgf49q9e9ohqbkj0ng.apps.googleusercontent.com';
     var API_KEY = 'AIzaSyDO0GhTJKd6YvVosrfOWfWNV70OKmZOUqQ';
-    var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
+    var DRIVE_FOLDER_ID = 'https://drive.google.com/drive/folders/1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq?usp=drive_linkhttps://drive.google.com/drive/folders/1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq?usp=drive_link'; 
+    
+    // Permisos de lectura para Calendar y Drive
+    var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly';
 
-    var tokenClient;
-    var gapiInited = false;
-    var gisInited = false;
+    // --- 2. CARRUSEL DE FOTOS DESDE DRIVE ---
+    var fotosDrive = [];
+    var fotoIndex = 0;
+    var carruselIniciado = false;
 
-    // Reloj y Fecha
+    function cargarFotosDrive() {
+      if (!DRIVE_FOLDER_ID || DRIVE_FOLDER_ID.indexOf('PEGA_AQUI') !== -1) return;
+
+      gapi.client.drive.files.list({
+        q: "'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed = false",
+        fields: 'files(id, name, thumbnailLink)',
+        pageSize: 50
+      }).then(function(response) {
+        var files = response.result.files;
+        if (files && files.length > 0) {
+          var nuevasUrls = [];
+          for (var i = 0; i < files.length; i++) {
+            if (files[i].thumbnailLink) {
+              // Ajusta la resolución de la miniatura a 1024px (ideal para iPad 2)
+              var hdUrl = files[i].thumbnailLink.replace(/=s\d+/, '=s1024');
+              nuevasUrls.push(hdUrl);
+            }
+          }
+          if (nuevasUrls.length > 0) {
+            fotosDrive = nuevasUrls;
+            if (!carruselIniciado) {
+              carruselIniciado = true;
+              cambiarFondo();
+              setInterval(cambiarFondo, 20000); // Rota cada 20 segundos
+            }
+          }
+        }
+      }, function(err) {
+        console.log('Error leyendo carpeta de Drive:', err);
+      });
+    }
+
+    function cambiarFondo() {
+      if (fotosDrive.length === 0) return;
+      var urlActual = fotosDrive[fotoIndex];
+      var img = new Image();
+      img.onload = function() {
+        document.body.style.backgroundImage = "url('" + urlActual + "')";
+        fotoIndex = (fotoIndex + 1) % fotosDrive.length;
+      };
+      img.src = urlActual;
+    }
+
+    // --- 3. CLIMA EN VIVO (HERMOSILLO VIA OPEN-METEO) ---
+    function obtenerClima() {
+      var xhr = new XMLHttpRequest();
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=29.0729&longitude=-110.9559&current_weather=true';
+      xhr.open('GET', url, true);
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+          try {
+            var data = JSON.parse(xhr.responseText);
+            var temp = Math.round(data.current_weather.temperature);
+            var code = data.current_weather.weathercode;
+            var desc = interpretarClima(code);
+            document.getElementById('weather-box').innerText = desc.icono + ' Hermosillo • ' + temp + '°C ' + desc.texto;
+          } catch (e) {
+            document.getElementById('weather-box').innerText = '☀️ Hermosillo';
+          }
+        }
+      };
+      xhr.send();
+    }
+
+    function interpretarClima(code) {
+      if (code === 0) return { icono: '☀️', texto: 'Despejado' };
+      if (code <= 3) return { icono: '⛅', texto: 'Parcialmente nublado' };
+      if (code <= 48) return { icono: '🌫️', texto: 'Neblina' };
+      if (code <= 67) return { icono: '🌧️', texto: 'Lluvia' };
+      if (code <= 82) return { icono: '🌦️', texto: 'Chubascos' };
+      if (code >= 95) return { icono: '⛈️', texto: 'Tormenta' };
+      return { icono: '🌤️', texto: 'Mayormente despejado' };
+    }
+    obtenerClima();
+    setInterval(obtenerClima, 1800000); // Actualiza cada 30 minutos
+
+    // --- 4. RELOJ Y FECHA ---
     var dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     var meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
@@ -198,12 +285,19 @@
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Inicializar GAPI (Calendar)
+    // --- 5. GOOGLE SERVICES (CALENDAR + DRIVE) ---
+    var tokenClient;
+    var gapiInited = false;
+    var gisInited = false;
+
     function gapiLoaded() {
       gapi.load('client', function() {
         gapi.client.init({
           apiKey: API_KEY,
-          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']
+          discoveryDocs: [
+            'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+            'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
+          ]
         }).then(function() {
           gapiInited = true;
           checkReady();
@@ -213,7 +307,6 @@
       });
     }
 
-    // Inicializar GIS (Autenticación nueva)
     function gisLoaded() {
       try {
         tokenClient = google.accounts.oauth2.initTokenClient({
@@ -226,6 +319,10 @@
             }
             document.getElementById('auth-card').style.display = 'none';
             listUpcomingEvents();
+            cargarFotosDrive();
+            // Revisa cada 15 minutos si subiste o borraste fotos desde tu celular
+            setInterval(cargarFotosDrive, 900000);
+            setInterval(listUpcomingEvents, 900000);
           }
         });
         gisInited = true;
