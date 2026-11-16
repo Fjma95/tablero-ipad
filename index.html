@@ -132,6 +132,17 @@
       text-align: center;
     }
 
+    .drive-badge {
+      position: absolute;
+      bottom: 14px;
+      right: 24px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.55);
+      background: rgba(0, 0, 0, 0.4);
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
     .alexa-bar {
       position: absolute;
       bottom: 0; left: 0; right: 0;
@@ -173,15 +184,15 @@
     </div>
   </div>
 
+  <div class="drive-badge" id="drive-status">Fotos: esperando conexión</div>
   <div class="alexa-bar"></div>
 
   <script>
     // --- 1. CONFIGURACIÓN Y CREDENCIALES ---
     var CLIENT_ID = '723569260705-9f2tiggc2gthf5dgf49q9e9ohqbkj0ng.apps.googleusercontent.com';
     var API_KEY = 'AIzaSyDO0GhTJKd6YvVosrfOWfWNV70OKmZOUqQ';
-    var DRIVE_FOLDER_ID = 'https://drive.google.com/drive/folders/1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq?usp=drive_linkhttps://drive.google.com/drive/folders/1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq?usp=drive_link'; 
+    var DRIVE_FOLDER_ID = '1BO2d-3XmsqTJGmB0wGKswpfiCguFsWSq';
     
-    // Permisos de lectura para Calendar y Drive
     var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly';
 
     // --- 2. CARRUSEL DE FOTOS DESDE DRIVE ---
@@ -190,34 +201,40 @@
     var carruselIniciado = false;
 
     function cargarFotosDrive() {
-      if (!DRIVE_FOLDER_ID || DRIVE_FOLDER_ID.indexOf('PEGA_AQUI') !== -1) return;
+      var badge = document.getElementById('drive-status');
+      badge.innerText = 'Fotos: buscando en Drive...';
 
       gapi.client.drive.files.list({
         q: "'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed = false",
-        fields: 'files(id, name, thumbnailLink)',
+        fields: 'files(id, name, mimeType)',
         pageSize: 50
       }).then(function(response) {
         var files = response.result.files;
         if (files && files.length > 0) {
           var nuevasUrls = [];
           for (var i = 0; i < files.length; i++) {
-            if (files[i].thumbnailLink) {
-              // Ajusta la resolución de la miniatura a 1024px (ideal para iPad 2)
-              var hdUrl = files[i].thumbnailLink.replace(/=s\d+/, '=s1024');
-              nuevasUrls.push(hdUrl);
+            // Ignora HEIC porque Safari en iOS 9.3.5 no puede renderizarlo
+            if (files[i].mimeType !== 'image/heic' && files[i].mimeType !== 'image/heif') {
+              nuevasUrls.push('https://drive.google.com/thumbnail?id=' + files[i].id + '&sz=w1024');
             }
           }
           if (nuevasUrls.length > 0) {
             fotosDrive = nuevasUrls;
+            badge.innerText = 'Fotos Drive: ' + fotosDrive.length + ' activas';
             if (!carruselIniciado) {
               carruselIniciado = true;
               cambiarFondo();
-              setInterval(cambiarFondo, 20000); // Rota cada 20 segundos
+              setInterval(cambiarFondo, 20000);
             }
+          } else {
+            badge.innerText = 'Fotos: solo hay archivos HEIC (usa JPG o PNG)';
           }
+        } else {
+          badge.innerText = 'Fotos: carpeta vacía o sin permisos';
         }
       }, function(err) {
-        console.log('Error leyendo carpeta de Drive:', err);
+        var msg = (err.result && err.result.error) ? err.result.error.message : 'Error de API';
+        badge.innerText = 'Error Drive: ' + msg;
       });
     }
 
@@ -227,6 +244,10 @@
       var img = new Image();
       img.onload = function() {
         document.body.style.backgroundImage = "url('" + urlActual + "')";
+        fotoIndex = (fotoIndex + 1) % fotosDrive.length;
+      };
+      img.onerror = function() {
+        // Si una imagen falla al cargar, salta a la siguiente
         fotoIndex = (fotoIndex + 1) % fotosDrive.length;
       };
       img.src = urlActual;
@@ -263,7 +284,7 @@
       return { icono: '🌤️', texto: 'Mayormente despejado' };
     }
     obtenerClima();
-    setInterval(obtenerClima, 1800000); // Actualiza cada 30 minutos
+    setInterval(obtenerClima, 1800000);
 
     // --- 4. RELOJ Y FECHA ---
     var dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -320,7 +341,6 @@
             document.getElementById('auth-card').style.display = 'none';
             listUpcomingEvents();
             cargarFotosDrive();
-            // Revisa cada 15 minutos si subiste o borraste fotos desde tu celular
             setInterval(cargarFotosDrive, 900000);
             setInterval(listUpcomingEvents, 900000);
           }
