@@ -25,6 +25,22 @@
       position: relative;
     }
 
+    /* Capa de video de fondo compatible con iOS 9 */
+    #bg-video {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      min-width: 100%;
+      min-height: 100%;
+      width: auto;
+      height: auto;
+      -webkit-transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%);
+      z-index: 0;
+      display: none;
+      object-fit: cover;
+    }
+
     .overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -33,6 +49,7 @@
       display: table;
       width: 100%;
       height: 100%;
+      z-index: 1;
     }
 
     .main-row { display: table-row; height: 85%; }
@@ -141,6 +158,7 @@
       background: rgba(0, 0, 0, 0.4);
       padding: 4px 10px;
       border-radius: 12px;
+      z-index: 2;
     }
 
     .alexa-bar {
@@ -149,6 +167,7 @@
       height: 6px;
       background: linear-gradient(90deg, #0051ff, #00e1ff, #0051ff);
       box-shadow: 0 -2px 15px #00e1ff;
+      z-index: 2;
     }
   </style>
 
@@ -156,6 +175,9 @@
   <script src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
+
+  <!-- Reproductor de video de fondo (silenciado para permitir autoplay en iOS 9) -->
+  <video id="bg-video" muted playsinline webkit-playsinline></video>
 
   <div class="overlay">
     <div class="main-row">
@@ -184,7 +206,7 @@
     </div>
   </div>
 
-  <div class="drive-badge" id="drive-status">Fotos: esperando conexión</div>
+  <div class="drive-badge" id="drive-status">Multimedia: esperando conexión</div>
   <div class="alexa-bar"></div>
 
   <script>
@@ -195,42 +217,56 @@
     
     var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly';
 
-    // --- 2. CARRUSEL DE FOTOS DESDE DRIVE ---
-    var fotosDrive = [];
-    var fotoIndex = 0;
+    // --- 2. CARRUSEL MIXTO (FOTOS + VIDEOS MP4 DESDE DRIVE) ---
+    var mediaDrive = [];
+    var mediaIndex = 0;
     var carruselIniciado = false;
+    var slideTimer = null;
 
-    function cargarFotosDrive() {
+    function cargarMultimediaDrive() {
       var badge = document.getElementById('drive-status');
-      badge.innerText = 'Fotos: buscando en Drive...';
+      badge.innerText = 'Drive: buscando fotos y videos...';
 
       gapi.client.drive.files.list({
-        q: "'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed = false",
+        q: "'" + DRIVE_FOLDER_ID + "' in parents and (mimeType contains 'image/' or mimeType = 'video/mp4') and trashed = false",
         fields: 'files(id, name, mimeType)',
         pageSize: 50
       }).then(function(response) {
         var files = response.result.files;
         if (files && files.length > 0) {
-          var nuevasUrls = [];
+          var nuevosItems = [];
+          var contFotos = 0;
+          var contVideos = 0;
+
           for (var i = 0; i < files.length; i++) {
-            // Ignora HEIC porque Safari en iOS 9.3.5 no puede renderizarlo
-            if (files[i].mimeType !== 'image/heic' && files[i].mimeType !== 'image/heif') {
-              nuevasUrls.push('https://drive.google.com/thumbnail?id=' + files[i].id + '&sz=w1024');
+            var f = files[i];
+            if (f.mimeType === 'video/mp4') {
+              nuevosItems.push({
+                tipo: 'video',
+                url: 'https://drive.google.com/uc?export=download&id=' + f.id
+              });
+              contVideos++;
+            } else if (f.mimeType !== 'image/heic' && f.mimeType !== 'image/heif') {
+              nuevosItems.push({
+                tipo: 'foto',
+                url: 'https://drive.google.com/thumbnail?id=' + f.id + '&sz=w1024'
+              });
+              contFotos++;
             }
           }
-          if (nuevasUrls.length > 0) {
-            fotosDrive = nuevasUrls;
-            badge.innerText = 'Fotos Drive: ' + fotosDrive.length + ' activas';
+
+          if (nuevosItems.length > 0) {
+            mediaDrive = nuevosItems;
+            badge.innerText = 'Drive: ' + contFotos + ' fotos, ' + contVideos + ' videos';
             if (!carruselIniciado) {
               carruselIniciado = true;
-              cambiarFondo();
-              setInterval(cambiarFondo, 20000);
+              mostrarSiguienteMedia();
             }
           } else {
-            badge.innerText = 'Fotos: solo hay archivos HEIC (usa JPG o PNG)';
+            badge.innerText = 'Drive: sin JPG/PNG/MP4 válidos';
           }
         } else {
-          badge.innerText = 'Fotos: carpeta vacía o sin permisos';
+          badge.innerText = 'Drive: carpeta vacía';
         }
       }, function(err) {
         var msg = (err.result && err.result.error) ? err.result.error.message : 'Error de API';
@@ -238,19 +274,57 @@
       });
     }
 
-    function cambiarFondo() {
-      if (fotosDrive.length === 0) return;
-      var urlActual = fotosDrive[fotoIndex];
-      var img = new Image();
-      img.onload = function() {
-        document.body.style.backgroundImage = "url('" + urlActual + "')";
-        fotoIndex = (fotoIndex + 1) % fotosDrive.length;
-      };
-      img.onerror = function() {
-        // Si una imagen falla al cargar, salta a la siguiente
-        fotoIndex = (fotoIndex + 1) % fotosDrive.length;
-      };
-      img.src = urlActual;
+    function mostrarSiguienteMedia() {
+      if (slideTimer) {
+        clearTimeout(slideTimer);
+        slideTimer = null;
+      }
+      if (mediaDrive.length === 0) return;
+
+      var item = mediaDrive[mediaIndex];
+      mediaIndex = (mediaIndex + 1) % mediaDrive.length;
+      var videoEl = document.getElementById('bg-video');
+
+      if (item.tipo === 'video') {
+        videoEl.src = item.url;
+        videoEl.style.display = 'block';
+        videoEl.load();
+
+        videoEl.onended = function() {
+          videoEl.style.display = 'none';
+          videoEl.src = '';
+          mostrarSiguienteMedia();
+        };
+
+        videoEl.onerror = function() {
+          videoEl.style.display = 'none';
+          videoEl.src = '';
+          mostrarSiguienteMedia();
+        };
+
+        var playPromise = videoEl.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(function() {
+            // Si iOS 9 bloquea el autoplay, salta al siguiente elemento
+            videoEl.style.display = 'none';
+            mostrarSiguienteMedia();
+          });
+        }
+      } else {
+        videoEl.pause();
+        videoEl.style.display = 'none';
+        videoEl.src = '';
+
+        var img = new Image();
+        img.onload = function() {
+          document.body.style.backgroundImage = "url('" + item.url + "')";
+          slideTimer = setTimeout(mostrarSiguienteMedia, 20000); // 20 segundos por foto
+        };
+        img.onerror = function() {
+          mostrarSiguienteMedia();
+        };
+        img.src = item.url;
+      }
     }
 
     // --- 3. CLIMA EN VIVO (HERMOSILLO VIA OPEN-METEO) ---
@@ -340,8 +414,8 @@
             }
             document.getElementById('auth-card').style.display = 'none';
             listUpcomingEvents();
-            cargarFotosDrive();
-            setInterval(cargarFotosDrive, 900000);
+            cargarMultimediaDrive();
+            setInterval(cargarMultimediaDrive, 900000);
             setInterval(listUpcomingEvents, 900000);
           }
         });
