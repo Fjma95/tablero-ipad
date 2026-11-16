@@ -11,7 +11,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
     body {
-      /* Fondo ambiental estilo Echo Show */
       background: #0d1117 url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1024&q=80') no-repeat center center fixed;
       background-size: cover;
       color: #ffffff;
@@ -21,7 +20,6 @@
       position: relative;
     }
 
-    /* Capa oscura para legibilidad */
     .overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -32,10 +30,7 @@
       height: 100%;
     }
 
-    .main-row {
-      display: table-row;
-      height: 85%;
-    }
+    .main-row { display: table-row; height: 85%; }
 
     .col-left {
       display: table-cell;
@@ -51,7 +46,6 @@
       width: 45%;
     }
 
-    /* Reloj y fecha gigante estilo Echo Show */
     .weather-badge {
       display: inline-block;
       background: rgba(255, 255, 255, 0.15);
@@ -78,7 +72,6 @@
       text-transform: capitalize;
     }
 
-    /* Tarjetas translúcidas */
     .widget-card {
       background: rgba(18, 24, 34, 0.78);
       border: 1px solid rgba(255, 255, 255, 0.15);
@@ -112,7 +105,6 @@
       display: block;
     }
 
-    /* Botón de conexión */
     .btn-alexa {
       background: linear-gradient(90deg, #00c6ff 0%, #0072ff 100%);
       color: #fff;
@@ -126,12 +118,16 @@
       box-shadow: 0 4px 12px rgba(0, 114, 255, 0.4);
     }
 
-    /* Barra inferior luminosa estilo Alexa+ */
+    .status-msg {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 8px;
+      text-align: center;
+    }
+
     .alexa-bar {
       position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
+      bottom: 0; left: 0; right: 0;
       height: 6px;
       background: linear-gradient(90deg, #0051ff, #00e1ff, #0051ff);
       box-shadow: 0 -2px 15px #00e1ff;
@@ -139,24 +135,24 @@
   </style>
 
   <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
 
   <div class="overlay">
     <div class="main-row">
       
-      <!-- Izquierda: Clima, Reloj Gigante y Fecha -->
       <div class="col-left">
         <div class="weather-badge" id="weather-box">☀️ Hermosillo • 29°C Despejado</div>
-        <div class="clock-big" id="time-display">09:27</div>
-        <div class="date-sub" id="date-display">Domingo, 15 de Noviembre</div>
+        <div class="clock-big" id="time-display">07:23</div>
+        <div class="date-sub" id="date-display">Lunes, 16 de Noviembre</div>
       </div>
 
-      <!-- Derecha: Tarjetas Inteligentes -->
       <div class="col-right">
         <div class="widget-card" id="auth-card">
           <div class="widget-header">Cuenta Familiar</div>
-          <button class="btn-alexa" onclick="handleAuthClick()">Sincronizar Google Calendar</button>
+          <button class="btn-alexa" id="auth-btn" onclick="handleAuthClick()">Sincronizar Google Calendar</button>
+          <div class="status-msg" id="status-text">Cargando servicios de Google...</div>
         </div>
 
         <div class="widget-card">
@@ -170,17 +166,19 @@
     </div>
   </div>
 
-  <!-- Barra de luz inferior estilo Alexa -->
   <div class="alexa-bar"></div>
 
   <script>
-    // --- CREDENCIALES ---
+    // --- CREDENCIALES INTEGRALES ---
     var CLIENT_ID = '723569260705-9f2tiggc2gthf5dgf49q9e9ohqbkj0ng.apps.googleusercontent.com';
-    var API_KEY = 'AIzaSyDO0GhTJKd6YvVosrfOWfWNV70OKmZOUqQ'; // <<--- PEGA AQUÍ TU API KEY REAL
-    var DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
-    var SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+    var API_KEY = 'AIzaSyDO0GhTJKd6YvVosrfOWfWNV70OKmZOUqQ';
+    var SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 
-    // Reloj y Fecha en Español (Compatible iOS 9)
+    var tokenClient;
+    var gapiInited = false;
+    var gisInited = false;
+
+    // Reloj y Fecha
     var dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     var meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
@@ -200,30 +198,56 @@
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Google API
-    function handleClientLoad() {
-      gapi.load('client:auth2', initClient);
+    // Inicializar GAPI (Calendar)
+    function gapiLoaded() {
+      gapi.load('client', function() {
+        gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']
+        }).then(function() {
+          gapiInited = true;
+          checkReady();
+        }, function(err) {
+          document.getElementById('status-text').innerText = 'Error API Key: ' + JSON.stringify(err);
+        });
+      });
     }
 
-    function initClient() {
-      gapi.client.init({
-        apiKey: API_KEY,
-        clientId: CLIENT_ID,
-        discoveryDocs: DISCOVERY_DOCS,
-        scope: SCOPES
-      }).then(function () {
-        if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
-          document.getElementById('auth-card').style.display = 'none';
-          listUpcomingEvents();
-        }
-      });
+    // Inicializar GIS (Autenticación nueva)
+    function gisLoaded() {
+      try {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: function(resp) {
+            if (resp.error !== undefined) {
+              document.getElementById('status-text').innerText = 'Error Auth: ' + resp.error;
+              return;
+            }
+            document.getElementById('auth-card').style.display = 'none';
+            listUpcomingEvents();
+          }
+        });
+        gisInited = true;
+        checkReady();
+      } catch (e) {
+        document.getElementById('status-text').innerText = 'Error cargando sesión: ' + e.message;
+      }
+    }
+
+    function checkReady() {
+      if (gapiInited && gisInited) {
+        document.getElementById('status-text').innerText = 'Listo para conectar';
+      }
     }
 
     function handleAuthClick() {
-      gapi.auth2.getAuthInstance().signIn().then(function() {
-        document.getElementById('auth-card').style.display = 'none';
-        listUpcomingEvents();
-      });
+      if (!tokenClient) {
+        alert('Espera un segundo a que terminen de cargar los servicios de Google.');
+        return;
+      }
+      document.getElementById('status-text').innerText = 'Abriendo ventana de Google...';
+      tokenClient.requestAccessToken({ prompt: 'consent' });
     }
 
     function listUpcomingEvents() {
@@ -239,7 +263,7 @@
         var list = document.getElementById('events-list');
         list.innerHTML = '';
 
-        if (events.length > 0) {
+        if (events && events.length > 0) {
           for (var i = 0; i < events.length; i++) {
             var event = events[i];
             var when = event.start.dateTime || event.start.date;
@@ -253,10 +277,15 @@
         } else {
           list.innerHTML = '<div class="event-item">No hay eventos próximos.</div>';
         }
+      }, function(err) {
+        document.getElementById('events-list').innerHTML = '<div class="event-item">Error al leer eventos: ' + err.result.error.message + '</div>';
       });
     }
 
-    handleClientLoad();
+    window.onload = function() {
+      gapiLoaded();
+      gisLoaded();
+    };
   </script>
 </body>
 </html>
